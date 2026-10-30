@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # 1. Strict syntax check: every .py file must compile.
+  syntax:
+    name: Syntax check (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Compile all Python files
+        run: |
+          python - <<'PY'
+          import pathlib
+          import sys
+
+          failed = []
+          files = sorted(
+              p for p in pathlib.Path(".").rglob("*.py")
+              if ".git" not in p.parts and ".venv" not in p.parts
+          )
+
+          for path in files:
+              source = path.read_text(encoding="utf-8")
+              try:
+                  compile(source, str(path), "exec")
+              except SyntaxError as exc:
+                  failed.append(f"{path}:{exc.lineno}: {exc.msg}")
+              else:
+                  print(f"OK  {path}")
+
+          if failed:
+              print("\nSyntax errors found:", file=sys.stderr)
+              print("\n".join(failed), file=sys.stderr)
+              sys.exit(1)
+
+          print(f"\n{len(files)} file(s) checked, no syntax errors.")
+          PY
+
+      - name: Smoke run
+        run: python main.py
+
+  # 2. Linting / static analysis.
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: python -m pip install --upgrade pip ruff
+
+      - name: Ruff check
+        run: ruff check --output-format=github .
+
+      - name: Ruff format check
+        run: ruff format --check --diff .
